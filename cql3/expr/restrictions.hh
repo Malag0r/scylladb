@@ -18,7 +18,8 @@ binary_operator validate_and_prepare_new_restriction(const binary_operator& rest
                                                      schema_ptr schema,
                                                      prepare_context& ctx);
 
-void validate_collection_column_relation(const expression& col_expr,
-                                         oper_t oper);
+void validate_single_collection_column_relation(const expression& col_expr,
+                                                oper_t oper,
+                                                schema_ptr schema);
 } // namespace expr
 } // namespace cql3

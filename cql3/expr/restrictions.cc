@@ -41,24 +41,6 @@ bool oper_is_slice(oper_t oper) {
     on_internal_error(expr_logger, format("oper_is_slice: Unhandled oper_t: {}", oper));
 }
 
-void validate_collection_column_relation(const column_value& lhs, oper_t oper, bool is_subscripted) {
-    using namespace statements::request_validations;
-
-    const abstract_type& lhs_col_type = lhs.col->column_specification->type->without_reversed();
-
-    if (lhs_col_type.is_collection()) {
-        const ::shared_ptr<column_identifier>& lhs_col_name = lhs.col->column_specification->name;
-
-        // We don't support relations against entire collections (unless they're frozen), like "numbers = {1, 2, 3}"
-        check_false(lhs_col_type.is_multi_cell()
-                    && !is_legal_relation_for_non_frozen_collection(oper, is_subscripted),
-                    "Collection column '{}' ({}) cannot be restricted by a '{}' relation",
-                    lhs_col_name,
-                    lhs_col_type.as_cql3_type(),
-                    oper);
-    }
-}
-
 void validate_single_column_relation(const column_value& lhs, oper_t oper, const schema& schema, bool is_lhs_subscripted) {
     using namespace statements::request_validations; // used for check_false and check_true
 
@@ -93,7 +75,15 @@ void validate_single_column_relation(const column_value& lhs, oper_t oper, const
         check_true(oper == oper_t::EQ, "Only EQ relations are supported on map/list entries");
     }
 
-    validate_collection_column_relation(lhs, oper, is_lhs_subscripted);
+    if (lhs_col_type.is_collection()) {
+        // We don't support relations against entire collections (unless they're frozen), like "numbers = {1, 2, 3}"
+        check_false(lhs_col_type.is_multi_cell()
+                    && !is_legal_relation_for_non_frozen_collection(oper, is_lhs_subscripted),
+                    "Collection column '{}' ({}) cannot be restricted by a '{}' relation",
+                    lhs_col_name,
+                    lhs_col_type.as_cql3_type(),
+                    oper);
+    }
 }
 
 std::vector<const column_definition*> to_column_definitions(const std::vector<expression>& cols) {
@@ -281,14 +271,22 @@ binary_operator validate_and_prepare_new_restriction(const binary_operator& rest
     return prepared_binop;
 }
 
-void validate_collection_column_relation(const expression& col_expr, oper_t oper) {
+void validate_single_collection_column_relation(const expression& col_expr, oper_t oper, schema_ptr schema) {
     if (auto col_val = as_if<column_value>(&col_expr)) {
-        // Simple single column restriction
-        validate_collection_column_relation(*col_val, oper, false);
+        // Simple single collection column restriction
+        const abstract_type& lhs_col_type = col_val->col->column_specification->type->without_reversed();
+
+        if (lhs_col_type.is_collection()) {
+            validate_single_column_relation(*col_val, oper, *schema, false);
+        }
     } else if (auto sub = as_if<subscript>(&col_expr)) {
-        // Subscripted single column restriction
+        // Subscripted single collection column restriction
         const column_value& sub_col = get_subscripted_column(*sub);
-        validate_collection_column_relation(sub_col, oper, true);
+        const abstract_type& lhs_col_type = sub_col.col->column_specification->type->without_reversed();
+
+        if (lhs_col_type.is_collection()) {
+            validate_single_column_relation(sub_col, oper, *schema, true);
+        }
     }
 }
 

@@ -20,7 +20,7 @@ def testInvalidCollectionEqualityRelation(cql, test_keyspace):
         assert_invalid_message(cql, table, "Collection column 'd' (map<int, int>) cannot be restricted by a '=' relation",
                              "SELECT * FROM %s WHERE a = 0 AND d=?", {0: 0})
 
-def testInvalidCollectionIntegerArgumentEqualityRelation(cql, test_keyspace):
+def testInvalidCollectionIntegerOperandEqualityRelation(cql, test_keyspace):
     with create_table(cql, test_keyspace, "(a int PRIMARY KEY, b set<int>, c list<int>, d map<int, int>)") as table:
         execute(cql, table, "CREATE INDEX ON %s (b)")
         execute(cql, table, "CREATE INDEX ON %s (c)")
@@ -32,7 +32,7 @@ def testInvalidCollectionIntegerArgumentEqualityRelation(cql, test_keyspace):
         assert_invalid_message(cql, table, "Collection column 'd' (map<int, int>) cannot be restricted by a '=' relation",
                              "SELECT * FROM %s WHERE a = 0 AND d=?", 1)
 
-def testInvalidCollectionIntegerArgumentNonEQRelation(cql, test_keyspace):
+def testInvalidCollectionIntegerOperandNonEQRelation(cql, test_keyspace):
     with create_table(cql, test_keyspace, "(a int PRIMARY KEY, b set<int>, c int)") as table:
         execute(cql, table, "CREATE INDEX ON %s (c)")
         execute(cql, table, "INSERT INTO %s (a, b, c) VALUES (0, {0}, 0)")
