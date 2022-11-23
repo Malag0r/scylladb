@@ -62,6 +62,7 @@ class cache_entry {
     schema_ptr _schema;
     dht::decorated_key _key;
     partition_entry _pe;
+    bool _eviction_mark = false;
     // True when we know that there is nothing between this entry and the previous one in cache
     struct {
         bool _continuous : 1;
@@ -149,6 +150,8 @@ public:
     void set_continuous(bool value) noexcept { _flags._continuous = value; }
 
     bool is_dummy_entry() const noexcept { return _flags._dummy_entry; }
+    bool is_marked_for_eviction() const noexcept { return _eviction_mark; }
+    void set_eviction_mark(bool evict) noexcept { _eviction_mark = evict; }
 
     friend std::ostream& operator<<(std::ostream&, cache_entry&);
 };
@@ -420,6 +423,8 @@ public:
     // Detaches current contents of given partition from LRU, so
     // that they are not evicted by memory reclaimer.
     void unlink_from_lru(const dht::decorated_key&);
+
+    void mark_partition_for_eviction(const dht::partition_range&);
 
     // Synchronizes cache with the underlying mutation source
     // by invalidating ranges which were modified. This will force

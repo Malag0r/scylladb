@@ -2063,8 +2063,8 @@ table::query(schema_ptr s,
             for (const auto& range : partition_ranges) {
                 const auto& range_key = range.start()->value().key()->with_schema(*sch);
 
-                clogger.info("table '{}' - dropping partition cache for key '{}'", schema()->cf_name(), range_key);
-                co_await _cache.invalidate(row_cache::external_updater([] {}), range);
+                clogger.info("table '{}' - mark partition cache for key '{}' to be evicted", schema()->cf_name(), range_key);
+                _cache.mark_partition_for_eviction(range);
             }
         }
 
