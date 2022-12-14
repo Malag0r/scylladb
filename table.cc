@@ -2064,7 +2064,7 @@ table::query(schema_ptr s,
                 const auto& range_key = range.start()->value().key()->with_schema(*sch);
 
                 clogger.info("table '{}' - mark partition cache for key '{}' to be evicted", schema()->cf_name(), range_key);
-                _cache.mark_partition_for_eviction(range);
+                _cache.mark_partition_for_invalidation(range);
             }
         }
 

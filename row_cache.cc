@@ -1043,17 +1043,6 @@ future<> row_cache::update(external_updater eu, memtable& m) {
         //        search it.
         if (cache_i != partitions_end() && hint.match) {
             cache_entry& entry = *cache_i;
-
-            if (entry.is_marked_for_eviction()) {
-                const partition_key& pkey = entry.key().key();
-                const std::string skey = fmt::format("{}", pkey.with_schema(*_schema));
-
-                entry.evict(_tracker);
-                entry.on_evicted(_tracker);
-                clogger.info("table {} cache dropped for partition key: '{}'", _schema->cf_name(), skey);
-                return utils::make_empty_coroutine();
-            }
-
             upgrade_entry(entry);
             assert(entry._schema == _schema);
             _tracker.on_partition_merge();
@@ -1127,14 +1116,28 @@ void row_cache::unlink_from_lru(const dht::decorated_key& dk) {
     });
 }
 
-void row_cache::mark_partition_for_eviction(const dht::partition_range& range) {
+void row_cache::mark_partition_for_invalidation(const dht::partition_range& range) {
     _read_section(_tracker.region(), [&] {
         auto it = _partitions.find(range.start()->value(), dht::ring_position_comparator(*_schema)); // TODO: use whole range
 
         if (it != _partitions.end()) {
-            it->set_eviction_mark(true);
+            it->set_invalidation_mark(true);
         }
     });
+}
+
+void row_cache::get_marked_for_invalidation(dht::partition_range_vector& ranges) const {
+    ranges.clear();
+
+    for (const auto& partition : _partitions) {
+        if (partition.is_marked_for_invalidation()) {
+            const auto& dkey = partition.key();
+            ranges.emplace_back(dht::partition_range::make_singular(std::move(dkey)));
+
+            clogger.info("table '{}' partition with key '{}' is used for invalidation on compaction",
+                _schema->cf_name(), dkey.key().with_schema(*_schema));
+        }
+    }
 }
 
 void row_cache::invalidate_locked(const dht::decorated_key& dk) {

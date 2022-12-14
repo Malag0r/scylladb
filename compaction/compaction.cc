@@ -593,7 +593,10 @@ protected:
 
     virtual compaction_completion_desc
     get_compaction_completion_desc(std::vector<shared_sstable> input_sstables, std::vector<shared_sstable> output_sstables) {
-        return compaction_completion_desc{std::move(input_sstables), std::move(output_sstables)};
+        dht::partition_range_vector ranges_for_cache_invalidation;
+        _cf.get_row_cache().get_marked_for_invalidation(ranges_for_cache_invalidation);
+
+        return compaction_completion_desc{std::move(input_sstables), std::move(output_sstables), std::move(ranges_for_cache_invalidation)};
     }
 
     // Tombstone expiration is enabled based on the presence of sstable set.
