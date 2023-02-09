@@ -66,6 +66,12 @@ hinted_handoff_enabled_to_json(const db::config::hinted_handoff_enabled_type& h)
     return value_to_json(h.to_configuration_string());
 }
 
+static
+json::json_return_type
+compact_cache_on_read_to_json(const db::compact_cache_on_read_type& c) {
+    return value_to_json(c.to_configuration_string());
+}
+
 // Convert a value that can be printed with operator<<, or a vector of
 // such values, to JSON. An example is enum_option<T>, because enum_option<T>
 // has a operator<<.
@@ -137,6 +143,9 @@ const config_type config_type_for<enum_option<db::tri_mode_restriction_t>> = con
 
 template <>
 const config_type config_type_for<db::config::hinted_handoff_enabled_type> = config_type("hinted handoff enabled", hinted_handoff_enabled_to_json);
+
+template <>
+const config_type config_type_for<db::compact_cache_on_read_type> = config_type("compact cache on read type", compact_cache_on_read_to_json);
 
 }
 
@@ -225,6 +234,18 @@ public:
         } catch (boost::program_options::invalid_option_value&) {
             return false;
         }
+        return true;
+    }
+};
+
+template<>
+struct convert<db::compact_cache_on_read_type> {
+    static bool decode(const Node& node, db::compact_cache_on_read_type& rhs) {
+        std::string opt;
+        if (!convert<std::string>::decode(node, opt)) {
+            return false;
+        }
+        rhs.parse_from_config_string(std::move(opt));
         return true;
     }
 };
@@ -667,6 +688,8 @@ db::config::config(std::shared_ptr<db::extensions> exts)
     , hinted_handoff_enabled(this, "hinted_handoff_enabled", value_status::Used, db::config::hinted_handoff_enabled_type(db::config::hinted_handoff_enabled_type::enabled_for_all_tag()),
         "Enable or disable hinted handoff. To enable per data center, add data center list. For example: hinted_handoff_enabled: DC1,DC2. A hint indicates that the write needs to be replayed to an unavailable node. "
         "Related information: About hinted handoff writes")
+    , compact_cache_on_read(this, "compact_cache_on_read", value_status::Used, db::compact_cache_on_read_type(),
+        "Compact cache on read")
     , max_hinted_handoff_concurrency(this, "max_hinted_handoff_concurrency", liveness::LiveUpdate, value_status::Used, 0,
         "Maximum concurrency allowed for sending hints. The concurrency is divided across shards and rounded up if not divisible by the number of shards. By default (or when set to 0), concurrency of 8*shard_count will be used.")
     , hinted_handoff_throttle_in_kb(this, "hinted_handoff_throttle_in_kb", value_status::Unused, 1024,
@@ -978,6 +1001,18 @@ std::istream& operator>>(std::istream& is, db::seed_provider_type& s) {
     // it's here just to make the code compile, but it's not yet called for real
     throw std::runtime_error("reading seed_provider_type from istream is not implemented");
     return is;
+}
+
+std::istream& operator>>(std::istream& is, compact_cache_on_read_type& c) {
+    sstring tmp;
+    is >> tmp;
+    c.parse_from_config_string(std::move(tmp));
+    return is;
+}
+
+std::ostream& operator<<(std::ostream& os, const db::compact_cache_on_read_type& c) {
+    os << "compact_cache_on_read_type{table_names=" << ::join(",", c._table_names) << "}";
+    return os;
 }
 
 }

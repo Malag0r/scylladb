@@ -10,6 +10,7 @@
 #pragma once
 
 #include <boost/program_options.hpp>
+//#include <boost/algorithm/string.hpp>
 #include <unordered_map>
 
 #include <seastar/core/sstring.hh>
@@ -23,6 +24,7 @@
 #include "locator/host_id.hh"
 #include "gms/inet_address.hh"
 #include "db/hints/host_filter.hh"
+#include "to_string.hh"
 
 namespace seastar {
 class file;
@@ -63,6 +65,45 @@ struct seed_provider_type {
 
 std::ostream& operator<<(std::ostream& os, const db::seed_provider_type& s);
 inline std::istream& operator>>(std::istream& is, seed_provider_type&);
+
+class compact_cache_on_read_type {
+    std::unordered_set<sstring> _table_names;
+public:
+    void parse_from_config_string(sstring opt) {
+        _table_names.clear();
+
+        //using namespace boost::algorithm;
+
+        std::vector<sstring> names;
+        //split(names, opt, is_any_of(","));
+
+        std::for_each(names.begin(), names.end(), [] (sstring& n) {
+            //trim(n);
+            if (n.empty()) {
+                throw std::runtime_error("compact_cache_on_read: table name may not be an empty string");
+            }
+        });
+
+        _table_names = std::unordered_set<sstring>(names.begin(), names.end());
+    }
+
+    sstring to_configuration_string() const {
+        return ::join(",", _table_names);
+    }
+
+    bool operator==(const compact_cache_on_read_type& other) const noexcept {
+        return _table_names == other._table_names;
+    }
+
+    /*bool find_table(const sstring& table_name) const {
+        return (_table_names.find(table_name) == _table_names.end());
+    }*/
+
+    friend std::ostream& operator<<(std::ostream&, const compact_cache_on_read_type&);
+};
+
+std::istream& operator>>(std::istream& is, compact_cache_on_read_type& c);
+std::ostream& operator<<(std::ostream& os, const db::compact_cache_on_read_type& c);
 
 }
 
@@ -132,6 +173,7 @@ public:
     using string_list = std::vector<sstring>;
     using seed_provider_type = db::seed_provider_type;
     using hinted_handoff_enabled_type = db::hints::host_filter;
+    using compact_cache_on_read_type = db::compact_cache_on_read_type;
 
     /*
      * All values and documentation taken from
@@ -263,6 +305,7 @@ public:
     named_value<uint32_t> dynamic_snitch_reset_interval_in_ms;
     named_value<uint32_t> dynamic_snitch_update_interval_in_ms;
     named_value<hinted_handoff_enabled_type> hinted_handoff_enabled;
+    named_value<compact_cache_on_read_type> compact_cache_on_read;
     named_value<uint32_t> max_hinted_handoff_concurrency;
     named_value<uint32_t> hinted_handoff_throttle_in_kb;
     named_value<uint32_t> max_hint_window_in_ms;
