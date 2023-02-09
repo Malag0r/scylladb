@@ -10,7 +10,9 @@
 #pragma once
 
 #include <boost/program_options.hpp>
-//#include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/classification.hpp>
+#include <boost/algorithm/string/split.hpp>
+#include <boost/algorithm/string/trim.hpp>
 #include <unordered_map>
 
 #include <seastar/core/sstring.hh>
@@ -71,14 +73,11 @@ class compact_cache_on_read_type {
 public:
     void parse_from_config_string(sstring opt) {
         _table_names.clear();
-
-        //using namespace boost::algorithm;
-
         std::vector<sstring> names;
-        //split(names, opt, is_any_of(","));
+        boost::split(names, opt, boost::is_any_of(","));
 
         std::for_each(names.begin(), names.end(), [] (sstring& n) {
-            //trim(n);
+            boost::trim(n);
             if (n.empty()) {
                 throw std::runtime_error("compact_cache_on_read: table name may not be an empty string");
             }
@@ -95,9 +94,9 @@ public:
         return _table_names == other._table_names;
     }
 
-    /*bool find_table(const sstring& table_name) const {
-        return (_table_names.find(table_name) == _table_names.end());
-    }*/
+    bool contains(const sstring& table_name) const {
+        return _table_names.contains(table_name);
+    }
 
     friend std::ostream& operator<<(std::ostream&, const compact_cache_on_read_type&);
 };
