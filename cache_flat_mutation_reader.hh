@@ -231,9 +231,9 @@ class cache_flat_mutation_reader final : public flat_mutation_reader_v2::impl {
     }
 
     gc_clock::time_point get_gc_before(const schema& schema, dht::decorated_key dk, const gc_clock::time_point query_time) {
-        auto tombstone_gc_state = _read_context.tombstone_gc_state();
-        if (tombstone_gc_state) {
-            return tombstone_gc_state->get_gc_before_for_key(schema.shared_from_this(), dk, query_time );
+        auto gc_state = _read_context.tombstone_gc_state();
+        if (gc_state) {
+            return gc_state->get_gc_before_for_key(schema.shared_from_this(), dk, query_time);
         }
 
         return gc_clock::time_point::min();
@@ -661,13 +661,40 @@ void cache_flat_mutation_reader::copy_from_cache_to_buffer() {
     if (_next_row_in_range) {
         bool remove_row = false;
 
-        if (_state == state::reading_from_cache && !_next_row.dummy()) { // maybe we'd better use at_a_row() instead of dummy() here?
-            deletable_row& row = _next_row.latest_row();
-            tombstone base_tombstone = _snp->version()->partition().range_tombstone_for_row(*_schema, _next_row.key());
+        if (!_next_row.dummy()
+            && _next_row.at_a_row()
+            && _next_row.continuous()
+            && _snp->at_latest_version()
+            && _snp->at_oldest_version()) {
 
-            if (!row.is_live(*_schema, column_kind::regular_column, base_tombstone, _read_time) && // should we really call is_live here?
-                row.deleted_at().max_deletion_time() < _gc_before) {
-                remove_row = true;
+            deletable_row& row = _next_row.latest_row();
+            tombstone range_tomb = _snp->version()->partition().range_tombstone_for_row(*_schema, _next_row.key());
+            auto t = row.deleted_at();
+            t.apply(range_tomb);
+
+            auto tomb_expired = [&](row_tombstone tomb) {
+                return (t && t.max_deletion_time() < _gc_before);
+            };
+
+            auto is_row_dead = [](const deletable_row& row, gc_clock::time_point now) {
+                return (!row.marker().is_missing() && row.marker().is_dead(now));
+            };
+
+            if (tomb_expired(t) || is_row_dead(row, _read_time)) {
+                can_gc_fn can_gc = [](tombstone) { return true; };
+                // compact_and_expire can change marker state and we have to keep its value and restore back if row won't removed
+                row_marker marker = row.marker();
+
+                with_allocator(_snp->region().allocator(), [&] {
+                    auto read_time = gc_clock::time_point::max();
+                    if (!row.compact_and_expire(*_schema, range_tomb, read_time, can_gc, _gc_before, nullptr)) {
+                        remove_row = row.empty();
+                    }
+                });
+
+                if (!remove_row) {
+                    row.marker() =  marker;
+                }
             }
         }
 
