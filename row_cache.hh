@@ -251,6 +251,8 @@ private:
 
     snapshot_source _snapshot_source;
 
+    bool _compact_on_read = false;
+
     // There can be at most one update in progress.
     seastar::semaphore _update_sem = {1};
 
@@ -353,7 +355,7 @@ private:
 
 public:
     ~row_cache();
-    row_cache(schema_ptr, snapshot_source, cache_tracker&, is_continuous = is_continuous::no);
+    row_cache(schema_ptr, snapshot_source, cache_tracker&, is_continuous = is_continuous::no, bool compact_on_read = false);
     row_cache(row_cache&&) = default;
     row_cache(const row_cache&) = delete;
     row_cache& operator=(row_cache&&) = default;
@@ -472,6 +474,10 @@ public:
     }
     cache_tracker& get_cache_tracker() {
         return _tracker;
+    }
+
+    bool is_compact_on_read() const {
+        return _compact_on_read;
     }
 
     void set_schema(schema_ptr) noexcept;

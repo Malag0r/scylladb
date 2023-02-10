@@ -1264,6 +1264,7 @@ keyspace::make_column_family_config(const schema& s, const database& db) const {
     cfg.view_update_concurrency_semaphore_limit = _config.view_update_concurrency_semaphore_limit;
     cfg.data_listeners = &db.data_listeners();
     cfg.x_log2_compaction_groups = db_config.x_log2_compaction_groups();
+    cfg.compact_cache_on_read = db_config.compact_cache_on_read().contains(s.ks_name(), s.cf_name());
 
     return cfg;
 }

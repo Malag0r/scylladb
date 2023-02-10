@@ -380,6 +380,7 @@ public:
         bool enable_optimized_twcs_queries{true};
         uint32_t tombstone_warn_threshold{0};
         unsigned x_log2_compaction_groups{0};
+        bool compact_cache_on_read = false;
     };
     struct no_commitlog {};
 

@@ -98,6 +98,10 @@ public:
         return _table_names.contains(table_name);
     }
 
+    bool contains(const sstring& ks_name, const sstring& cf_name) const {
+        return _table_names.contains(format("{}.{}", ks_name, cf_name));
+    }
+
     friend std::ostream& operator<<(std::ostream&, const compact_cache_on_read_type&);
 };
 

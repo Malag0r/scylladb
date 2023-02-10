@@ -1180,12 +1180,13 @@ void row_cache::evict() {
     while (_tracker.region().evict_some() == memory::reclaiming_result::reclaimed_something) {}
 }
 
-row_cache::row_cache(schema_ptr s, snapshot_source src, cache_tracker& tracker, is_continuous cont)
+row_cache::row_cache(schema_ptr s, snapshot_source src, cache_tracker& tracker, is_continuous cont, bool compact_on_read)
     : _tracker(tracker)
     , _schema(std::move(s))
     , _partitions(dht::raw_token_less_comparator{})
     , _underlying(src())
     , _snapshot_source(std::move(src))
+    , _compact_on_read(compact_on_read)
 {
     with_allocator(_tracker.allocator(), [this, cont] {
         cache_entry entry(cache_entry::dummy_entry_tag{});
@@ -1290,7 +1291,7 @@ flat_mutation_reader_v2 cache_entry::do_read(row_cache& rc, read_context& reader
     auto snp = _pe.read(rc._tracker.region(), rc._tracker.cleaner(), _schema, &rc._tracker, reader.phase());
     auto ckr = query::clustering_key_filter_ranges::get_native_ranges(*_schema, reader.native_slice(), _key.key());
     schema_ptr entry_schema = to_query_domain(reader.slice(), _schema);
-    auto r = make_cache_flat_mutation_reader(entry_schema, _key, std::move(ckr), rc, reader, std::move(snp));
+    auto r = make_cache_flat_mutation_reader(entry_schema, _key, std::move(ckr), rc, reader, std::move(snp), rc.is_compact_on_read());
     r.upgrade_schema(to_query_domain(reader.slice(), rc.schema()));
     r.upgrade_schema(reader.schema());
     return r;
@@ -1302,7 +1303,7 @@ flat_mutation_reader_v2 cache_entry::do_read(row_cache& rc, std::unique_ptr<read
     schema_ptr reader_schema = unique_ctx->schema();
     schema_ptr entry_schema = to_query_domain(unique_ctx->slice(), _schema);
     auto rc_schema = to_query_domain(unique_ctx->slice(), rc.schema());
-    auto r = make_cache_flat_mutation_reader(entry_schema, _key, std::move(ckr), rc, std::move(unique_ctx), std::move(snp));
+    auto r = make_cache_flat_mutation_reader(entry_schema, _key, std::move(ckr), rc, std::move(unique_ctx), std::move(snp), rc.is_compact_on_read());
     r.upgrade_schema(rc_schema);
     r.upgrade_schema(reader_schema);
     return r;

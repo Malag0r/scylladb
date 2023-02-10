@@ -158,6 +158,8 @@ class cache_flat_mutation_reader final : public flat_mutation_reader_v2::impl {
     gc_clock::time_point _read_time;
     gc_clock::time_point _gc_before;
 
+    bool _compact_on_read = false;
+
     future<> do_fill_buffer();
     future<> ensure_underlying();
     void copy_from_cache_to_buffer();
@@ -245,7 +247,8 @@ public:
                                query::clustering_key_filter_ranges&& crr,
                                read_context& ctx,
                                partition_snapshot_ptr snp,
-                               row_cache& cache)
+                               row_cache& cache,
+                               bool compact_on_read)
         : flat_mutation_reader_v2::impl(std::move(s), ctx.permit())
         , _snp(std::move(snp))
         , _ck_ranges(std::move(crr))
@@ -261,6 +264,7 @@ public:
         , _rt_merger(*_schema)
         , _read_time(gc_clock::now())
         , _gc_before(get_gc_before(*_schema, dk, _read_time))
+        , _compact_on_read(compact_on_read)
     {
         clogger.trace("csm {}: table={}.{}, reversed={}, snap={}", fmt::ptr(this), _schema->ks_name(), _schema->cf_name(), _read_context.is_reversed(),
                       fmt::ptr(&*_snp));
@@ -271,8 +275,9 @@ public:
                                query::clustering_key_filter_ranges&& crr,
                                std::unique_ptr<read_context> unique_ctx,
                                partition_snapshot_ptr snp,
-                               row_cache& cache)
-        : cache_flat_mutation_reader(s, std::move(dk), std::move(crr), *unique_ctx, std::move(snp), cache)
+                               row_cache& cache,
+                               bool compact_on_read)
+        : cache_flat_mutation_reader(s, std::move(dk), std::move(crr), *unique_ctx, std::move(snp), cache, compact_on_read)
     {
         // Assume ownership of the read_context.
         // It is our responsibility to close it now.
@@ -661,7 +666,8 @@ void cache_flat_mutation_reader::copy_from_cache_to_buffer() {
     if (_next_row_in_range) {
         bool remove_row = false;
 
-        if (!_next_row.dummy()
+        if (_compact_on_read
+            && !_next_row.dummy()
             && _next_row.at_a_row()
             && _next_row.continuous()
             && _snp->at_latest_version()
@@ -1004,10 +1010,11 @@ inline flat_mutation_reader_v2 make_cache_flat_mutation_reader(schema_ptr s,
                                                             query::clustering_key_filter_ranges crr,
                                                             row_cache& cache,
                                                             cache::read_context& ctx,
-                                                            partition_snapshot_ptr snp)
+                                                            partition_snapshot_ptr snp,
+                                                            bool compact_on_read)
 {
     return make_flat_mutation_reader_v2<cache::cache_flat_mutation_reader>(
-        std::move(s), std::move(dk), std::move(crr), ctx, std::move(snp), cache);
+        std::move(s), std::move(dk), std::move(crr), ctx, std::move(snp), cache, compact_on_read);
 }
 
 // transfer ownership of ctx to cache_flat_mutation_reader
@@ -1016,8 +1023,9 @@ inline flat_mutation_reader_v2 make_cache_flat_mutation_reader(schema_ptr s,
                                                             query::clustering_key_filter_ranges crr,
                                                             row_cache& cache,
                                                             std::unique_ptr<cache::read_context> unique_ctx,
-                                                            partition_snapshot_ptr snp)
+                                                            partition_snapshot_ptr snp,
+                                                            bool compact_on_read)
 {
     return make_flat_mutation_reader_v2<cache::cache_flat_mutation_reader>(
-        std::move(s), std::move(dk), std::move(crr), std::move(unique_ctx), std::move(snp), cache);
+        std::move(s), std::move(dk), std::move(crr), std::move(unique_ctx), std::move(snp), cache, compact_on_read);
 }

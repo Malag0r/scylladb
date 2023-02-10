@@ -1419,7 +1419,7 @@ table::table(schema_ptr schema, config config, db::commitlog* cl, compaction_man
     , _compaction_strategy(make_compaction_strategy(_schema->compaction_strategy(), _schema->compaction_strategy_options()))
     , _compaction_groups(make_compaction_groups())
     , _sstables(make_compound_sstable_set())
-    , _cache(_schema, sstables_as_snapshot_source(), row_cache_tracker, is_continuous::yes)
+    , _cache(_schema, sstables_as_snapshot_source(), row_cache_tracker, is_continuous::yes, config.compact_cache_on_read)
     , _commitlog(cl)
     , _durable_writes(true)
     , _sstables_manager(sst_manager)
