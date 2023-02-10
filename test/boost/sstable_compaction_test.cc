@@ -3393,7 +3393,7 @@ SEASTAR_TEST_CASE(incremental_compaction_data_resurrection_test) {
 
         auto is_partition_dead = [&s, &cf, &env] (partition_key& pkey) {
             replica::column_family::const_mutation_partition_ptr mp = cf->find_partition_slow(s, env.make_reader_permit(), pkey).get0();
-            return mp && bool(mp->partition_tombstone());
+            return mp && mp->live_row_count(*s, gc_clock::time_point::max()) == 0;
         };
 
         cf->add_sstable_and_update_cache(non_expired_sst).get();
