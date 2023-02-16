@@ -110,6 +110,9 @@ class cache_flat_mutation_reader final : public flat_mutation_reader_v2::impl {
     flat_mutation_reader_v2* _underlying = nullptr;
     flat_mutation_reader_v2_opt _underlying_holder;
 
+    gc_clock::time_point _read_time;
+    gc_clock::time_point _gc_before;
+
     future<> do_fill_buffer();
     future<> ensure_underlying();
     void copy_from_cache_to_buffer();
@@ -178,6 +181,20 @@ class cache_flat_mutation_reader final : public flat_mutation_reader_v2::impl {
     const schema& table_schema() {
         return *_snp->schema();
     }
+
+    gc_clock::time_point get_read_time() {
+        return _read_context.tombstone_gc_state() ? gc_clock::now() : gc_clock::time_point::min();
+    }
+
+    gc_clock::time_point get_gc_before(const schema& schema, dht::decorated_key dk, const gc_clock::time_point query_time) {
+        auto gc_state = _read_context.tombstone_gc_state();
+        if (gc_state) {
+            return gc_state->get_gc_before_for_key(schema.shared_from_this(), dk, query_time);
+        }
+
+        return gc_clock::time_point::min();
+    }
+
 public:
     cache_flat_mutation_reader(schema_ptr s,
                                dht::decorated_key dk,
@@ -196,6 +213,8 @@ public:
         , _read_context_holder()
         , _read_context(ctx)    // ctx is owned by the caller, who's responsible for closing it.
         , _next_row(*_schema, *_snp, false, _read_context.is_reversed())
+        , _read_time(get_read_time())
+        , _gc_before(get_gc_before(*_schema, dk, _read_time))
     {
         clogger.trace("csm {}: table={}.{}, reversed={}, snap={}", fmt::ptr(this), _schema->ks_name(), _schema->cf_name(), _read_context.is_reversed(),
                       fmt::ptr(&*_snp));
@@ -730,20 +749,92 @@ void cache_flat_mutation_reader::copy_from_cache_to_buffer() {
         }
     }
 
-    // We add the row to the buffer even when it's full.
-    // This simplifies the code. For more info see #3139.
     if (_next_row_in_range) {
-        if (_next_row.range_tombstone_for_row() != _current_tombstone) [[unlikely]] {
-            auto tomb = _next_row.range_tombstone_for_row();
-            auto new_lower_bound = position_in_partition::before_key(_next_row.position());
-            clogger.trace("csm {}: rtc({}, {})", fmt::ptr(this), new_lower_bound, tomb);
-            push_mutation_fragment(mutation_fragment_v2(*_schema, _permit, range_tombstone_change(new_lower_bound, tomb)));
-            _lower_bound = std::move(new_lower_bound);
-            _current_tombstone = tomb;
-            _read_context.cache()._tracker.on_range_tombstone_read();
+        bool remove_row = false;
+
+        auto tomb_expired = [&](tombstone tomb) {
+            return (tomb && tomb.deletion_time < _gc_before);
+        };
+
+        if (_read_context.tombstone_gc_state() // do not compact rows when tombstone_gc_state is not set (used in some unit tests)
+            && _snp->at_latest_version()
+            && _snp->at_oldest_version()) {
+            if (!_next_row.dummy()) {
+                deletable_row& row = _next_row.latest_row();
+                tombstone range_tomb = _next_row.range_tombstone_for_row();
+                auto t = row.deleted_at();
+                t.apply(range_tomb);
+
+                auto row_tomb_expired = [&](row_tombstone tomb) {
+                    return (tomb && tomb.max_deletion_time() < _gc_before);
+                };
+
+                auto is_row_dead = [&](const deletable_row& row) {
+                    return (!row.marker().is_missing() && row.marker().is_dead(_read_time));
+                };
+
+                if (row_tomb_expired(t) || is_row_dead(row)) {
+                    can_gc_fn always_gc = [&](tombstone) { return true; };
+                    row_marker marker = row.marker();
+
+                    try {
+                        with_allocator(_snp->region().allocator(), [&] {
+                            row.compact_and_expire(*_schema, range_tomb, _read_time, always_gc, _gc_before, nullptr);
+                        });
+                        remove_row = row.empty();
+                    } catch (...) {
+                        row.marker() = marker;
+                        throw;
+                    }
+
+                    auto latests_range_tomb = _next_row.get_iterator_in_latest_version()->range_tombstone();
+                    if (tomb_expired(latests_range_tomb)) {
+                        _next_row.get_iterator_in_latest_version()->set_range_tombstone({});
+                    }
+                }
+            } else { // dummy row
+                tombstone range_tomb = _next_row.range_tombstone_for_row();
+                if (tomb_expired(range_tomb)) {
+                    _next_row.ensure_entry_in_latest().row.set_continuous(true);
+                }
+            }
         }
-        add_to_buffer(_next_row);
-        move_to_next_entry();
+
+        if (remove_row) {
+            tombstone range_tomb = _next_row.range_tombstone_for_row();
+            if (tomb_expired(range_tomb)) {
+                _lower_bound = position_in_partition::after_key(*_schema, _next_row.position());
+            }
+
+            partition_snapshot_row_weakref row_ref(_next_row);
+            move_to_next_entry();
+
+            with_allocator(_snp->region().allocator(), [&] {
+                cache_tracker& tracker = _read_context.cache()._tracker;
+                if (row_ref->is_linked()) {
+                    tracker.get_lru().remove(*row_ref);
+                }
+                row_ref->on_evicted(tracker);
+            });
+
+            _snp->region().allocator().invalidate_references();
+            _next_row.force_valid();
+        } else {
+            // We add the row to the buffer even when it's full.
+            // This simplifies the code. For more info see #3139.
+            if (_next_row.range_tombstone_for_row() != _current_tombstone) [[unlikely]] {
+                auto tomb = _next_row.range_tombstone_for_row();
+                auto new_lower_bound = position_in_partition::before_key(_next_row.position());
+                clogger.trace("csm {}: rtc({}, {})", fmt::ptr(this), new_lower_bound, tomb);
+                push_mutation_fragment(mutation_fragment_v2(*_schema, _permit, range_tombstone_change(new_lower_bound, tomb)));
+                _lower_bound = std::move(new_lower_bound);
+                _current_tombstone = tomb;
+                _read_context.cache()._tracker.on_range_tombstone_read();
+            }
+
+            add_to_buffer(_next_row);
+            move_to_next_entry();
+        }
     } else {
         move_to_next_range();
     }

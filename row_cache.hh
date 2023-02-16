@@ -361,6 +361,7 @@ public:
     // User needs to ensure that the row_cache object stays alive
     // as long as the reader is used.
     // The range must not wrap around.
+
     flat_mutation_reader_v2 make_reader(schema_ptr s,
                                      reader_permit permit,
                                      const dht::partition_range& range,
@@ -368,8 +369,9 @@ public:
                                      const io_priority_class& pc = default_priority_class(),
                                      tracing::trace_state_ptr trace_state = nullptr,
                                      streamed_mutation::forwarding fwd = streamed_mutation::forwarding::no,
-                                     mutation_reader::forwarding fwd_mr = mutation_reader::forwarding::no) {
-        if (auto reader_opt = make_reader_opt(s, permit, range, slice, pc, std::move(trace_state), fwd, fwd_mr)) {
+                                     mutation_reader::forwarding fwd_mr = mutation_reader::forwarding::no,
+                                     const tombstone_gc_state* gc_state = nullptr) {
+        if (auto reader_opt = make_reader_opt(s, permit, range, slice, gc_state, pc, std::move(trace_state), fwd, fwd_mr)) {
             return std::move(*reader_opt);
         }
         [[unlikely]] return make_empty_flat_reader_v2(std::move(s), std::move(permit));
@@ -380,14 +382,19 @@ public:
                                      reader_permit permit,
                                      const dht::partition_range&,
                                      const query::partition_slice&,
+                                     const tombstone_gc_state*,
                                      const io_priority_class& = default_priority_class(),
                                      tracing::trace_state_ptr trace_state = nullptr,
                                      streamed_mutation::forwarding fwd = streamed_mutation::forwarding::no,
                                      mutation_reader::forwarding fwd_mr = mutation_reader::forwarding::no);
 
-    flat_mutation_reader_v2 make_reader(schema_ptr s, reader_permit permit, const dht::partition_range& range = query::full_partition_range) {
+    flat_mutation_reader_v2 make_reader(schema_ptr s,
+                                    reader_permit permit,
+                                    const dht::partition_range& range = query::full_partition_range,
+                                    const tombstone_gc_state* gc_state = nullptr) {
         auto& full_slice = s->full_slice();
-        return make_reader(std::move(s), std::move(permit), range, full_slice);
+        return make_reader(std::move(s), std::move(permit), range, full_slice, default_priority_class(), nullptr,
+                streamed_mutation::forwarding::no, mutation_reader::forwarding::no, gc_state);
     }
 
     const stats& stats() const { return _stats; }
