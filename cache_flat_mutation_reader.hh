@@ -692,8 +692,7 @@ void cache_flat_mutation_reader::copy_from_cache_to_buffer() {
                 row_marker marker = row.marker();
 
                 with_allocator(_snp->region().allocator(), [&] {
-                    auto read_time = gc_clock::time_point::max();
-                    if (!row.compact_and_expire(*_schema, range_tomb, read_time, can_gc, _gc_before, nullptr)) {
+                    if (!row.compact_and_expire(*_schema, range_tomb, _read_time, can_gc, _gc_before, nullptr)) {
                         remove_row = row.empty();
                     }
                 });
